@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>云电脑 · 中文远程桌面</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;overflow:hidden;background:#0f1620;font-family:"Microsoft YaHei","PingFang SC",sans-serif}
+#bar{position:fixed;top:0;left:0;right:0;height:46px;background:#1c2634;display:flex;align-items:center;padding:0 10px;z-index:50;gap:6px;box-shadow:0 2px 6px rgba(0,0,0,.4)}
+#bar .ttl{color:#4da3ff;font-weight:700;font-size:15px;margin-right:4px}
+#st{color:#9fb3c8;font-size:12px;flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.btn{background:#2b3purple;background:#2b3648;color:#d6e2f0;border:0;padding:6px 11px;border-radius:5px;font-size:12px;cursor:pointer}
+.btn:active{opacity:.7}
+.btn.b{background:#1e5eff;color:#fff}
+.btn.g{background:#10b981;color:#fff}
+.btn.r{background:#ef4444;color:#fff}
+#wrap{position:absolute;top:46px;left:0;right:0;bottom:0;overflow:auto;background:#000}
+#screen{display:block;width:100%;height:100%}
+#screen canvas{display:block}
+#mask{position:fixed;inset:0;background:rgba(15,22,32,.96);z-index:100;display:flex;align-items:center;justify-content:center;flex-direction:column;color:#cfd8e3;padding:20px;text-align:center}
+#mask .lg{font-size:22px;color:#4da3ff;margin-bottom:14px;font-weight:700}
+#mask .msg{font-size:13px;line-height:1.9;color:#9fb3c8}
+#mask input{width:100%;max-width:320px;padding:11px;border:1px solid #2b3648;background:#16202c;color:#d6e2f0;border-radius:5px;margin:9px 0;font-size:13px}
+#mask .row{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;justify-content:center}
+.spin{width:34px;height:34px;border:3px solid #2b3648;border-top-color:#4da3ff;border-radius:50%;animation:s .8s linear infinite;margin-bottom:14px}
+@keyframes s{to{transform:rotate(360deg)}}
+.hide{display:none!important}
+#kb{position:fixed;bottom:0;left:0;right:0;background:#1c2634;padding:8px;z-index:60;display:flex;gap:6px;flex-wrap:wrap}
+#kb input{flex:1;min-width:120px;padding:9px;background:#16202c;border:1px solid #2b3648;color:#d6e2f0;border-radius:5px;font-size:14px}
+#kb .k{padding:9px 13px;background:#2b3648;color:#d6e2f0;border:0;border-radius:5px;font-size:13px}
+</style>
+</head>
+<body>
+<div id="bar">
+  <span class="ttl">☁ 云电脑</span>
+  <span id="st">正在获取地址…</span>
+  <button class="btn b" onclick="doReconnect()">重连</button>
+  <button class="btn" onclick="toggleKb()">键盘</button>
+  <button class="btn" onclick="doFull()">全屏</button>
+  <button class="btn g" onclick="openPanel()">面板</button>
+  <button class="btn" onclick="showSet()">设置</button>
+</div>
+<div id="wrap"><div id="screen"></div></div>
+
+<div id="kb" class="hide">
+  <input id="kbin" placeholder="点这里弹出手机键盘，输入会同步到云电脑" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+  <button class="k" onclick="kbSend()">发送</button>
+  <button class="k" onclick="kbKey('Return')">回车</button>
+  <button class="k" onclick="kbKey('Backspace')">删除</button>
+  <button class="k" onclick="toggleKb()">收起</button>
+</div>
+
+<div id="mask">
+  <div class="lg">☁ 云电脑</div>
+  <div class="spin" id="spin"></div>
+  <div class="msg" id="mmsg">正在获取最新连接地址…</div>
+  <div id="mbox" class="hide">
+    <input id="addr" placeholder="https://xxx.trycloudflare.com">
+    <input id="pwd" type="password" placeholder="连接密码" value="123456">
+    <div class="row">
+      <button class="btn b" onclick="saveAndGo()">保存并连接</button>
+      <button class="btn" onclick="retryFetch()">重新获取地址</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+const DEFAULT_ADDR = 'https://uses-kitty-biography-planning.trycloudflare.com';
+const DEFAULT_PWD  = '123456';
+const ADDR_URLS = [
+  'https://raw.githubusercontent.com/mos-a11y/ai-generated-operating-system/main/.vm-output/desktop-url.txt',
+  'https://cdn.jsdelivr.net/gh/mos-a11y/ai-generated-operating-system@main/.vm-output/desktop-url.txt',
+  'https://gh-proxy.com/https://raw.githubusercontent.com/mos-a11y/ai-generated-operating-system/main/.vm-output/desktop-url.txt'
+];
+const PANEL_URLS = [
+  'https://raw.githubusercontent.com/mos-a11y/ai-generated-operating-system/main/.vm-output/panel-url.txt',
+  'https://cdn.jsdelivr.net/gh/mos-a11y/ai-generated-operating-system@main/.vm-output/panel-url.txt'
+];
+const RFB_SRCS = [
+  'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.4.0/core/rfb.js',
+  'https://unpkg.com/@novnc/novnc@1.4.0/core/rfb.js',
+  'https://cdn.jsdelivr.net/gh/novnc/noVNC@master/core/rfb.js'
+];
+
+const $ = id => document.getElementById(id);
+let rfb = null, RFB = null, curUrl = '', curPwd = DEFAULT_PWD;
+
+function setSt(t){ $('st').textContent = t; }
+function mask(show, msg, spin){
+  $('mask').classList.toggle('hide', !show);
+  if(msg !== undefined) $('mmsg').textContent = msg;
+  $('spin').classList.toggle('hide', !spin);
+}
+function showSet(){ $('mbox').classList.remove('hide'); $('addr').value = localStorage.getItem('cd_addr') || DEFAULT_ADDR; $('pwd').value = localStorage.getItem('cd_pwd') || DEFAULT_PWD; mask(true, '手动设置连接地址', false); }
+
+function normalize(raw){
+  if(!raw) return '';
+  let s = String(raw).trim();
+  s = s.replace(/\/vnc\.html.*$/, '').replace(/\?.*$/, '').replace(/\/+$/, '');
+  if(!/^https?:\/\//.test(s)) s = 'https://' + s;
+  return s;
+}
+function toWs(origin){
+  const u = new URL(origin);
+  return (u.protocol === 'https:' ? 'wss://' : 'ws://') + u.host + '/websockify';
+}
+
+async function fetchText(urls){
+  for(const u of urls){
+    try{
+      const r = await fetch(u + (u.includes('?')?'&':'?') + '_t=' + Date.now(), {cache:'no-store'});
+      if(r.ok){ const t = (await r.text()).trim(); if(t) return t; }
+    }catch(e){}
+  }
+  return '';
+}
+
+async function loadRFB(){
+  if(RFB) return RFB;
+  for(const s of RFB_SRCS){
+    try{ const m = await import(s); if(m && m.default){ RFB = m.default; return RFB; } }catch(e){}
+  }
+  throw new Error('noVNC 组件加载失败');
+}
+
+async function connect(url, pwd){
+  if(rfb){ try{ rfb.disconnect(); }catch(e){} rfb = null; }
+  $('screen').innerHTML = '';
+  setSt('连接中…');
+  mask(true, '正在连接 ' + url, true);
+  try{
+    await loadRFB();
+  }catch(e){
+    mask(true, '组件加载失败，请检查网络后重试', false); $('mbox').classList.remove('hide'); return;
+  }
+  const ws = toWs(url);
+  try{
+    rfb = new RFB($('screen'), ws, { credentials:{ password: pwd }, shared:true, wsProtocols:['binary'] });
+  }catch(e){
+    mask(true, '创建连接失败：' + e.message, false); $('mbox').classList.remove('hide'); return;
+  }
+  rfb.scaleViewport = true;
+  rfb.resizeSession = false;
+  rfb.qualityLevel = 5;
+  rfb.compressionLevel = 6;
+  rfb.addEventListener('connect', () => {
+    mask(false); setSt('已连接 · ' + url);
+    try{ rfb.focus(); }catch(e){}
+  });
+  rfb.addEventListener('disconnect', (e) => {
+    const clean = e && e.detail && e.detail.clean;
+    mask(true, clean ? '连接已断开，点重新连接' : '连接失败：地址可能已失效，点「重新获取地址」拿最新地址', false);
+    $('mbox').classList.remove('hide');
+    setSt('未连接');
+  });
+  rfb.addEventListener('securityfailure', (e) => {
+    mask(true, '密码错误或安全认证失败', false); $('mbox').classList.remove('hide');
+  });
+  rfb.addEventListener('credentialsrequired', () => {
+    rfb.sendCredentials({ password: pwd });
+  });
+  rfb.addEventListener('desktopname', (e) => { setSt('已连接 · ' + (e.detail.name || url)); });
+}
+
+async function boot(){
+  mask(true, '正在获取最新连接地址…', true);
+  let addr = normalize(await fetchText(ADDR_URLS));
+  if(!addr) addr = normalize(localStorage.getItem('cd_addr') || DEFAULT_ADDR);
+  curPwd = localStorage.getItem('cd_pwd') || DEFAULT_PWD;
+  localStorage.setItem('cd_addr', addr);
+  $('addr').value = addr; $('pwd').value = curPwd;
+  if(!addr){ mask(true, '未获取到地址，请手动填写', false); $('mbox').classList.remove('hide'); return; }
+  curUrl = addr;
+  await connect(addr, curPwd);
+}
+
+window.doReconnect = function(){
+  const a = normalize(localStorage.getItem('cd_addr') || DEFAULT_ADDR);
+  connect(a, localStorage.getItem('cd_pwd') || DEFAULT_PWD);
+};
+window.retryFetch = function(){ $('mbox').classList.add('hide'); boot(); };
+window.saveAndGo = function(){
+  const a = normalize($('addr').value); const p = $('pwd').value || DEFAULT_PWD;
+  if(!a){ alert('请填写地址'); return; }
+  localStorage.setItem('cd_addr', a); localStorage.setItem('cd_pwd', p);
+  curUrl = a; curPwd = p; $('mbox').classList.add('hide');
+  connect(a, p);
+};
+window.doFull = function(){
+  const el = document.documentElement;
+  if(!document.fullscreenElement){ (el.requestFullscreen||el.webkitRequestFullscreen||function(){}).call(el); }
+  else { (document.exitFullscreen||document.webkitExitFullscreen||function(){}).call(document); }
+};
+window.toggleKb = function(){ $('kb').classList.toggle('hide'); if(!$('kb').classList.contains('hide')) $('kbin').focus(); };
+window.kbSend = function(){
+  const v = $('kbin').value; if(!v || !rfb) return;
+  for(const ch of v){ rfb.sendKey(ch.codePointAt(0), ch.length>1?('U'+ch.codePointAt(0).toString(16).toUpperCase().padStart(4,'0')):ch); }
+  $('kbin').value = '';
+};
+window.kbKey = function(k){
+  if(!rfb) return;
+  const map = { Return: 0xff0d, Backspace: 0xff08 };
+  rfb.sendKey(map[k] || 0xff0d, k);
+};
+window.openPanel = async function(){
+  setSt('正在获取面板地址…');
+  let p = (await fetchText(PANEL_URLS) || '').trim();
+  if(p && !/^https?:\/\//.test(p)) p = 'https://' + p;
+  if(p){ window.open(p, '_blank'); setSt('已打开云面板'); }
+  else { alert('云面板地址暂未生成，请稍后再试'); setSt('面板不可用'); }
+};
+
+if(!RFB_SRCS.length){ mask(true,'配置错误',false); } else { boot(); }
+</script>
+</body>
+</html>
