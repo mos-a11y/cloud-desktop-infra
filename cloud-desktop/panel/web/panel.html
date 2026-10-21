@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>云面板 · 服务器管理</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{font-family:"Microsoft YaHei","PingFang SC",Arial,sans-serif;background:#f2f4f7;color:#333;font-size:14px}
+.top{height:50px;background:linear-gradient(90deg,#1e5eff,#3b82f6);color:#fff;display:flex;align-items:center;padding:0 12px;position:fixed;top:0;left:0;right:0;z-index:100}
+.top .logo{font-size:17px;font-weight:700}
+.top .rt{margin-left:auto;font-size:11px;display:flex;gap:8px}
+.top .rt b{background:rgba(255,255,255,.22);padding:2px 6px;border-radius:4px}
+.side{width:150px;background:#2b3648;position:fixed;top:86px;bottom:0;left:0;overflow:auto;z-index:90}
+.side a{display:block;color:#b8c2d0;padding:11px 13px;text-decoration:none;font-size:13px;border-left:3px solid transparent}
+.side a:hover{background:#374357;color:#fff}
+.side a.on{background:#1e5eff;color:#fff;border-left-color:#ffd166}
+.main{margin-left:150px;padding:98px 14px 20px}
+.card{background:#fff;border-radius:6px;padding:14px;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.card h3{font-size:14px;margin-bottom:10px;padding-left:8px;border-left:3px solid #1e5eff}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:11px}
+.kpi{background:#fff;border-radius:6px;padding:13px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.kpi .t{font-size:12px;color:#888}
+.kpi .v{font-size:22px;font-weight:700;margin:4px 0;color:#1e5eff}
+.kpi .d{font-size:11px;color:#999;word-break:break-all}
+.bar{height:6px;background:#eef1f5;border-radius:4px;overflow:hidden;margin-top:6px}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,#1e5eff,#59a0ff)}
+.bar.warn i{background:linear-gradient(90deg,#f59e0b,#fbbf24)}
+.bar.bad i{background:linear-gradient(90deg,#ef4444,#f87171)}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{padding:6px 7px;text-align:left;border-bottom:1px solid #eef1f5}
+th{background:#fafbfc;color:#666}
+canvas{width:100%;height:120px;background:#fafbfc;border-radius:4px}
+.btn{background:#1e5eff;color:#fff;border:0;padding:6px 11px;border-radius:4px;cursor:pointer;font-size:12px;margin:2px 3px 2px 0}
+.btn:active{opacity:.7}
+.btn.g{background:#10b981}.btn.r{background:#ef4444}.btn.o{background:#f59e0b}.btn.gray{background:#6b7280}
+.apps{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px}
+.app{border:1px solid #e5e9f0;border-radius:5px;padding:9px;display:flex;gap:7px;cursor:pointer}
+.app.sel{border-color:#1e5eff;background:#eaf2ff}
+.app .tag{font-size:10px;background:#eef2f7;color:#666;padding:1px 5px;border-radius:3px}
+.app .nm{font-size:12px;font-weight:600}
+.app .pk{font-size:10px;color:#aaa;word-break:break-all}
+pre{background:#0f1620;color:#cfd8e3;padding:10px;border-radius:5px;max-height:300px;overflow:auto;font-size:11px;font-family:Consolas,monospace;white-space:pre-wrap}
+input,textarea{width:100%;padding:8px;border:1px solid #d5dbe3;border-radius:4px;font-size:13px;font-family:inherit}
+textarea{font-family:Consolas,monospace;font-size:12px}
+.hide{display:none!important}
+.note{background:#fff8e6;border:1px solid #ffe08a;padding:8px;border-radius:5px;font-size:12px;color:#8a6100;margin-bottom:11px}
+.live{display:inline-block;width:8px;height:8px;border-radius:50%;background:#10b981;margin-right:4px}
+.live.off{background:#9ca3af}
+.row{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap}
+.row input{flex:1;min-width:150px}
+.tools{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
+.tool{border:1px solid #e5e9f0;border-radius:5px;padding:10px;text-align:center;cursor:pointer;font-size:12px}
+.tool:hover{border-color:#1e5eff;background:#f5f9ff}
+.tool .ic{font-size:18px;display:block;margin-bottom:4px}
+@media(max-width:720px){.side{width:0}.side a{display:none}.main{margin-left:0;padding-top:56px}.top .rt{display:none}}
+</style>
+</head>
+<body>
+<div class="top">
+  <span class="logo">☁ 云面板</span>
+  <div class="rt"><span><span id="live" class="live off"></span><b id="t_ts">--</b></span><span>负载 <b id="t_load">-</b></span></div>
+</div>
+<div id="hostbar" style="position:fixed;top:50px;left:0;right:0;z-index:95;background:#fff;padding:7px 12px;border-bottom:1px solid #e5e9f0;display:flex;gap:6px;align-items:center;font-size:12px">
+  <span style="color:#666">云电脑地址</span>
+  <input id="hostin" placeholder="如 xxx.trycloudflare.com" style="flex:1;padding:5px;font-size:12px">
+  <button class="btn" style="padding:5px 9px" onclick="saveHost()">连接</button>
+  <button class="btn gray" style="padding:5px 9px" onclick="$('gate').classList.remove('hide')">密钥</button>
+</div>
+<div class="side" style="top:86px">
+  <a href="#" class="on" data-p="home">📊 首页监控</a>
+  <a href="#" data-p="proc">⚙ 进程管理</a>
+  <a href="#" data-p="file">📁 文件管理</a>
+  <a href="#" data-p="term">💻 终端命令</a>
+  <a href="#" data-p="store">🛒 软件商店</a>
+  <a href="#" data-p="tool">🔧 快捷工具</a>
+  <a href="#" data-p="net">🌐 网络端口</a>
+  <a href="#" data-p="sys">🖥 系统信息</a>
+</div>
+
+<div id="gate" class="hide" style="position:fixed;inset:0;background:rgba(15,22,32,.96);z-index:200;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:24px;color:#cfd8e3;text-align:center">
+  <div style="font-size:20px;color:#4da3ff;font-weight:700;margin-bottom:10px">☁ 云面板</div>
+  <div style="font-size:12px;color:#9fb3c8;margin-bottom:12px;line-height:1.8">填一次即可，保存在本机浏览器<br>用于读取云电脑数据 + 发送操控指令</div>
+  <input id="gatein" placeholder="粘贴访问密钥" style="max-width:340px;background:#16202c;border:1px solid #2b3648;color:#d6e2f0">
+  <button class="btn b" style="margin-top:10px;padding:9px 22px" onclick="saveTok()">进入面板</button>
+</div>
+
+<div class="main">
+  <div class="note" id="hint">正在读取云电脑实时数据…</div>
+
+  <div id="p_home">
+    <div class="grid">
+      <div class="kpi"><div class="t">CPU</div><div class="v" id="k_cpu">--</div><div class="d" id="k_cpu_d">-</div><div class="bar" id="b_cpu"><i style="width:0"></i></div></div>
+      <div class="kpi"><div class="t">内存</div><div class="v" id="k_mem">--</div><div class="d" id="k_mem_d">-</div><div class="bar" id="b_mem"><i style="width:0"></i></div></div>
+      <div class="kpi"><div class="t">磁盘</div><div class="v" id="k_disk">--</div><div class="d" id="k_disk_d">-</div><div class="bar" id="b_disk"><i style="width:0"></i></div></div>
+      <div class="kpi"><div class="t">网络下行</div><div class="v" id="k_net">--</div><div class="d" id="k_net_d">-</div></div>
+    </div>
+    <div class="card"><h3>CPU 曲线</h3><canvas id="c_cpu"></canvas></div>
+    <div class="card"><h3>内存 / 网络曲线</h3><canvas id="c_mem"></canvas>
+      <div style="margin-top:5px;font-size:11px;color:#888"><span style="color:#1e5eff">■</span>内存 <span style="color:#10b981">■</span>下行 <span style="color:#f59e0b">■</span>上行</div></div>
+  </div>
+
+  <div id="p_proc" class="hide">
+    <div class="card"><h3>进程管理（可结束进程）</h3>
+      <div class="row"><input id="pfilter" placeholder="按名称过滤，如 firefox" oninput="renderProc()"></div>
+      <table><thead><tr><th>PID</th><th>名称</th><th>CPU%</th><th>内存</th><th>操作</th></tr></thead><tbody id="proc_body"></tbody></table>
+    </div>
+  </div>
+
+  <div id="p_file" class="hide">
+    <div class="card"><h3>文件管理</h3>
+      <div class="row">
+        <input id="fpath" value="/home/runner">
+        <button class="btn" onclick="listDir()">打开</button>
+        <button class="btn gray" onclick="upDir()">上级</button>
+      </div>
+      <table><thead><tr><th>名称</th><th>大小</th><th>修改时间</th><th>操作</th></tr></thead><tbody id="file_body"></tbody></table>
+    </div>
+    <div class="card"><h3>文件编辑 / 新建（保存即写入云电脑）</h3>
+      <div class="row"><input id="fname" placeholder="完整路径，如 /home/runner/test.txt">
+        <button class="btn" onclick="readFile()">读取</button>
+        <button class="btn g" onclick="writeFile()">保存写入</button>
+        <button class="btn r" onclick="delFile()">删除</button></div>
+      <textarea id="fcontent" rows="12" placeholder="文件内容…"></textarea>
+    </div>
+  </div>
+
+  <div id="p_term" class="hide">
+    <div class="card"><h3>终端命令（在云电脑上执行）</h3>
+      <div class="row"><input id="cmdin" placeholder="输入命令后回车，如 ls / df -h" onkeydown="if(event.key=='Enter')runCmd()">
+        <button class="btn" onclick="runCmd()">执行</button></div>
+      <div>
+        <button class="btn o" onclick="q('neofetch')">系统信息</button>
+        <button class="btn o" onclick="q('df -h')">磁盘</button>
+        <button class="btn o" onclick="q('free -h')">内存</button>
+        <button class="btn o" onclick="q('ls ~/Desktop')">桌面文件</button>
+        <button class="btn o" onclick="q('ps aux --sort=-%cpu | head -15')">CPU进程</button>
+        <button class="btn o" onclick="q('cat /tmp/panel.log')">面板日志</button>
+      </div>
+      <pre id="olog" style="margin-top:9px">结果会显示在这里</pre>
+    </div>
+  </div>
+
+  <div id="p_store" class="hide">
+    <div class="card"><h3>软件商店（可安装 / 卸载）</h3>
+      <div id="apps" class="apps"></div>
+      <div style="font-size:11px;color:#888;margin-top:8px">安装前自动更新软件源。若提示「软件源里没有」，是该软件在当前系统版本不可用，换一个即可。</div>
+      <div style="margin-top:8px">
+        <button class="btn g" onclick="doInstall()">安装选中</button>
+        <button class="btn r" onclick="doRemove()">卸载选中</button>
+      </div>
+    </div>
+    <div class="card"><h3>执行日志</h3><pre id="ilog">等待任务…</pre></div>
+  </div>
+
+  <div id="p_tool" class="hide">
+    <div class="card"><h3>快捷工具</h3>
+      <div class="tools">
+        <div class="tool" onclick="q('sudo apt-get update -qq && sudo apt-get upgrade -y -qq 2>&1 | tail -5')"><span class="ic">🔄</span>更新系统</div>
+        <div class="tool" onclick="q('sudo apt-get clean && sudo apt-get autoremove -y 2>&1 | tail -3')"><span class="ic">🧹</span>清理缓存</div>
+        <div class="tool" onclick="q('pkill -f xfdesktop; sleep 2; setsid nohup xfdesktop --display=:1 & sleep 3; echo 桌面已重启')"><span class="ic">🖥</span>重启桌面</div>
+        <div class="tool" onclick="q('xfce4-terminal & echo 已打开终端')"><span class="ic">💻</span>打开终端</div>
+        <div class="tool" onclick="q('thunar & echo 已打开文件管理器')"><span class="ic">📁</span>文件管理器</div>
+        <div class="tool" onclick="q('curl -sL https://raw.githubusercontent.com/mos-a11y/ai-generated-operating-system/main/cloud-desktop/setup.sh -o /tmp/s.sh && bash /tmp/s.sh 2>&1 | tail -20')"><span class="ic">⚙</span>重装配置</div>
+        <div class="tool" onclick="q('pgrep -f panel/server.py || (setsid nohup python3 cloud-desktop/panel/server.py >/tmp/panel.log 2>&1 &); sleep 3; echo 面板已启动')"><span class="ic">☁</span>启动面板</div>
+        <div class="tool" onclick="q('ls -la ~/Desktop')"><span class="ic">🔍</span>查看桌面</div>
+        <div class="tool" onclick="q('df -h; echo; free -h; echo; uptime')"><span class="ic">📊</span>资源概览</div>
+        <div class="tool" onclick="q('sudo fc-cache -fv >/dev/null 2>&1; echo 字体缓存已刷新')"><span class="ic">🔤</span>刷新字体</div>
+      </div>
+    </div>
+    <div class="card"><h3>执行日志</h3><pre id="tlog">等待…</pre></div>
+  </div>
+
+  <div id="p_net" class="hide">
+    <div class="card"><h3>监听端口</h3><pre id="ports">加载中…</pre></div>
+    <div class="card"><h3>运行中的服务</h3><pre id="services">加载中…</pre></div>
+  </div>
+
+  <div id="p_sys" class="hide">
+    <div class="card"><h3>系统信息</h3><table id="sys_body"></table></div>
+    <div class="card"><h3>磁盘分区</h3><table id="disk_body"></table></div>
+  </div>
+</div>
+
+<script>
+var API='https://api.github.com/repos/mos-a11y/ai-generated-operating-system/contents/';
+var TOKEN=localStorage.getItem('panel_tok')||'';
+var H={'Authorization':'token '+TOKEN,'Accept':'application/vnd.github+json'};
+var HIST={cpu:[],mem:[],rx:[],tx:[]}, PROCS=[], PENDING=null, POLL=null;
+
+function $(i){return document.getElementById(i);}
+function human(n){var u=['B','KB','MB','GB','TB'],i=0;n=+n||0;while(n>=1024&&i<u.length-1){n/=1024;i++;}return n.toFixed(1)+' '+u[i];}
+function upStr(s){var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return (d?d+'天':'')+(h?h+'小时':'')+m+'分';}
+function setBar(id,p){$(id).className='bar'+(p>85?' bad':p>65?' warn':'');$(id).firstElementChild.style.width=Math.min(p,100)+'%';}
+
+var RAW='https://raw.githubusercontent.com/mos-a11y/ai-generated-operating-system/main/';
+var HOST=localStorage.getItem('panel_host')||'';
+async function getFile(p){
+  var name=p.split('/').pop();
+  if(HOST){
+    try{var r0=await fetch('https://'+HOST+'/'+name+'?_='+Date.now(),{cache:'no-store'});
+      if(r0.ok){var t0=await r0.text();if(t0&&t0[0]==='{')return {txt:t0,sha:null};}}catch(e){}
+  }
+  try{var r=await fetch(RAW+p+'?_='+Date.now(),{cache:'no-store'});
+  if(r.ok)return {txt:await r.text(),sha:null};}catch(e){}
+  // 回退：带密钥的 API（私有仓库时用）
+  if(!TOKEN)return null;
+  try{var r2=await fetch(API+p+'?ref=main&_='+Date.now(),{headers:H,cache:'no-store'});
+  if(!r2.ok)return null;var j=await r2.json();
+  return {txt:decodeURIComponent(escape(atob(j.content.replace(/\n/g,'')))),sha:j.sha};}catch(e){return null;}}
+async function putFile(p,txt){
+  var c=await getFile(p);var b={message:'panel',content:btoa(unescape(encodeURIComponent(txt))),branch:'main'};
+  if(c)b.sha=c.sha;
+  var r=await fetch(API+p,{method:'PUT',headers:Object.assign({'Content-Type':'application/json'},H),body:JSON.stringify(b)});
+  return r.ok;}
+
+async function sendCmd(type,payload,logIds){
+  var id=String(Date.now());
+  if(!await putFile('.vm-output/commands.json',JSON.stringify({id:id,type:type,payload:payload}))){alert('发送失败');return;}
+  PENDING=id;
+  logIds.forEach(function(i){$(i).textContent='指令已发送，等待云电脑执行（约10-60秒）…\n';});
+  if(POLL)clearInterval(POLL);
+  POLL=setInterval(function(){pollResult(logIds);},5000);
+}
+async function pollResult(logIds){
+  var f=await getFile('.vm-output/command-result.json');if(!f)return;
+  try{var j=JSON.parse(f.txt);if(j.id!==PENDING)return;
+    var t='['+j.status+']\n'+(j.log||'');
+    logIds.forEach(function(i){$(i).textContent=t;});
+    if(j.status==='done'){clearInterval(POLL);POLL=null;PENDING=null;}}catch(e){}
+}
+
+function draw(id,ss){
+  var c=$(id);if(!c)return;var w=c.width=c.clientWidth,h=c.height=c.clientHeight,g=c.getContext('2d');
+  g.clearRect(0,0,w,h);g.strokeStyle='#e8ecf2';
+  for(var i=1;i<4;i++){g.beginPath();g.moveTo(0,h*i/4);g.lineTo(w,h*i/4);g.stroke();}
+  ss.forEach(function(s){var d=s.data;if(!d||d.length<2)return;var mx=Math.max.apply(null,d)||1;
+    g.beginPath();g.strokeStyle=s.color;g.lineWidth=2;
+    d.forEach(function(v,i){var x=i/(d.length-1)*w,y=h-(v/mx)*(h-8)-4;i?g.lineTo(x,y):g.moveTo(x,y);});
+    g.stroke();g.lineTo(w,h);g.lineTo(0,h);g.closePath();g.fillStyle=s.fill;g.fill();});
+}
+
+function renderProc(){
+  var f=($('pfilter').value||'').toLowerCase();
+  $('proc_body').innerHTML=PROCS.filter(function(p){return !f||p.name.toLowerCase().indexOf(f)>=0;}).slice(0,40).map(function(p){
+    return '<tr><td>'+p.pid+'</td><td>'+p.name+'</td><td>'+(p.cpu||0)+'%</td><td>'+human(p.rss)+'</td>'+
+    '<td><button class="btn r" onclick="killProc('+p.pid+')">结束</button></td></tr>';}).join('');
+}
+function killProc(pid){if(confirm('确定结束进程 '+pid+'？'))sendCmd('shell','kill -9 '+pid+' && echo 已结束 '+pid,['olog']);}
+
+async function listDir(){
+  var p=$('fpath').value||'/';
+  sendCmd('shell','ls -la --time-style=long-iso "'+p+'" 2>&1 | tail -60',['olog']);
+  setTimeout(function(){PENDING&&0;},10);
+  // 结果在 olog，做二次解析
+  window._dirMode=true;
+}
+function upDir(){var p=$('fpath').value||'/';$('fpath').value=p.replace(/\/[^/]*\/?$/, '')||'/';listDir();}
+function readFile(){var f=$('fname').value;if(!f){alert('填路径');return;}
+  sendCmd('shell','cat "'+f+'" 2>&1 | head -200',['olog']);window._readMode=true;}
+function writeFile(){var f=$('fname').value,c=$('fcontent').value;
+  if(!f){alert('填路径');return;}
+  var b64=btoa(unescape(encodeURIComponent(c)));
+  sendCmd('shell','echo "'+b64+'" | base64 -d > "'+f+'" && echo 写入成功 && wc -c "'+f+'"',['olog']);}
+function delFile(){var f=$('fname').value;if(!f||!confirm('删除 '+f+'？'))return;
+  sendCmd('shell','rm -rf "'+f+'" && echo 已删除',['olog']);}
+
+function q(c){$('cmdin').value=c;runCmd();go('term');}
+function runCmd(){var c=$('cmdin').value;if(!c)return;sendCmd('shell',c,['olog','tlog']);$('cmdin').value='';}
+
+var APPS=[['浏览器','Epiphany','epiphany-browser'],['浏览器','Falkon','falkon'],
+['办公','LibreOffice','libreoffice'],['办公','PDF阅读器','evince'],
+['图形','GIMP','gimp'],['图形','Inkscape','inkscape'],['图形','截图工具','flameshot'],
+['影音','VLC播放器','vlc'],['影音','Audacity','audacity'],['影音','ffmpeg','ffmpeg'],
+['系统','htop','htop'],['系统','neofetch','neofetch'],['系统','GParted','gparted'],
+['开发','Python pip','python3-pip'],['开发','Git','git'],['开发','Vim','vim'],['开发','Node.js','nodejs npm'],
+['工具','7zip','p7zip-full'],['工具','Wine','wine'],['工具','tmux','tmux'],['工具','ranger','ranger'],
+['聊天','Thunderbird','thunderbird'],['服务','Nginx','nginx'],['服务','MySQL客户端','mysql-client']];
+var sel={};
+function renderApps(){
+  $('apps').innerHTML=APPS.map(function(a,i){
+    return '<div class="app" id="a'+i+'" onclick="tog('+i+')"><input type="checkbox" id="c'+i+'" style="margin-top:2px">'+
+    '<div><div class="nm">'+a[1]+' <span class="tag">'+a[0]+'</span></div><div class="pk">'+a[2]+'</div></div></div>';}).join('');
+}
+function tog(i){var el=$('a'+i),cb=$('c'+i);cb.checked=!cb.checked;el.className='app'+(cb.checked?' sel':'');
+  if(cb.checked)sel[APPS[i][2]]=1;else delete sel[APPS[i][2]];}
+function doInstall(){var k=Object.keys(sel);if(!k.length){alert('先勾选');return;}
+  sendCmd('install',k.join(' '),['ilog']);}
+function doRemove(){var k=Object.keys(sel);if(!k.length){alert('先勾选');return;}
+  sendCmd('remove',k.join(' '),['ilog']);}
+
+async function tick(){
+  var f=await getFile('.vm-output/panel-stats.json');
+  if(!f){
+    $('hint').className='note';
+    $('hint').innerHTML='读不到数据。原因通常是：① 云电脑已关机（找我重开一台）；② 国内访问 raw.githubusercontent.com 不通。'+
+      '解决办法：点右上角「密钥」填一次访问密钥（api.github.com 国内可直连），数据立刻就来。'+
+      '<br>已填密钥仍无数据 = 云电脑关了，让我重开。';
+    $('live').className='live off';return;}
+  var d;try{d=JSON.parse(f.txt);}catch(e){return;}
+  $('hint').className='hide';$('live').className='live';$('t_ts').textContent=d.ts||'';
+  $('k_cpu').textContent=(d.cpu||0)+'%';
+  $('k_cpu_d').textContent=((d.cpu_info&&d.cpu_info.cores)||'?')+'核 '+((d.cpu_info&&d.cpu_info.model)||'').slice(0,20);
+  setBar('b_cpu',d.cpu||0);
+  $('k_mem').textContent=((d.mem&&d.mem.percent)||0)+'%';
+  $('k_mem_d').textContent=human(d.mem&&d.mem.used)+'/'+human(d.mem&&d.mem.total);
+  setBar('b_mem',(d.mem&&d.mem.percent)||0);
+  $('k_disk').textContent=((d.disk&&d.disk.percent)||0)+'%';
+  $('k_disk_d').textContent=human(d.disk&&d.disk.used)+'/'+human(d.disk&&d.disk.total);
+  setBar('b_disk',(d.disk&&d.disk.percent)||0);
+  var rx=(d.net_rate&&d.net_rate.rx)||0,tx=(d.net_rate&&d.net_rate.tx)||0;
+  $('k_net').textContent=human(rx)+'/s';$('k_net_d').textContent='↑'+human(tx)+'/s';
+  $('t_load').textContent=(d.load||[]).join('/');
+  HIST.cpu.push(d.cpu||0);HIST.mem.push((d.mem&&d.mem.percent)||0);
+  HIST.rx.push(Math.round(rx/1024));HIST.tx.push(Math.round(tx/1024));
+  ['cpu','mem','rx','tx'].forEach(function(k){if(HIST[k].length>60)HIST[k].shift();});
+  draw('c_cpu',[{data:HIST.cpu,color:'#1e5eff',fill:'rgba(30,94,255,.12)'}]);
+  draw('c_mem',[{data:HIST.mem,color:'#1e5eff',fill:'rgba(30,94,255,.08)'},
+    {data:HIST.rx,color:'#10b981',fill:'rgba(16,185,129,.06)'},
+    {data:HIST.tx,color:'#f59e0b',fill:'rgba(245,158,11,.06)'}]);
+  PROCS=d.processes||[];renderProc();
+  $('ports').textContent=d.ports||'无数据';
+  $('services').textContent=d.services||'无数据';
+  var rows=[['主机名',d.hostname],['系统',d.system],['内核',d.kernel],
+    ['CPU',((d.cpu_info&&d.cpu_info.model)||'')+' ('+((d.cpu_info&&d.cpu_info.cores)||'?')+'核)'],
+    ['公网IP',d.ip||'-'],['内存',human(d.mem&&d.mem.total)],['负载',(d.load||[]).join(' / ')],
+    ['运行时长',upStr(d.uptime||0)]];
+  $('sys_body').innerHTML=rows.map(function(r){return '<tr><th style="width:100px">'+r[0]+'</th><td>'+r[1]+'</td></tr>';}).join('');
+  $('disk_body').innerHTML=(d.disks||[]).map(function(k){
+    return '<tr><td>'+k.mount+'</td><td>'+human(k.used)+'/'+human(k.total)+'</td><td>'+k.percent+'%</td></tr>';}).join('')
+    ||'<tr><td colspan="3">无数据</td></tr>';
+  // 目录列表指令结果解析
+  if(window._dirMode&&PENDING===null){window._dirMode=false;
+    var t=$('olog').textContent||'';$('file_body').innerHTML=t.split('\n').slice(1).filter(function(l){return l.trim();})
+      .map(function(l){var m=l.match(/^(\S+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(\d+)\s+(\S+\s\S+)\s+(.+)$/);
+        if(!m)return '';var dir=m[1][0]==='d';
+        var nm=m[7].split('/').pop();
+        return '<tr><td>'+(dir?'📁 ':'📄 ')+nm+'</td><td>'+(dir?'-':human(+m[5]))+'</td><td>'+m[6]+'</td>'+
+        '<td><button class="btn" onclick="openItem(\''+nm+'\','+dir+')">'+(dir?'进入':'查看')+'</button></td></tr>';}).join('');
+  }
+  if(window._readMode&&PENDING===null){window._readMode=false;
+    var raw=$('olog').textContent||'';
+    $('fcontent').value=raw.replace(/^\[done\]\n/,'');}
+}
+function openItem(nm,isDir){var p=($('fpath').value||'/').replace(/\/+$/,'')+'/'+nm;
+  if(isDir){$('fpath').value=p;listDir();}else{$('fname').value=p;readFile();}}
+
+function go(p){
+  document.querySelectorAll('.side a').forEach(function(a){a.className=(a.dataset.p===p?'on':'');});
+  ['home','proc','file','term','store','tool','net','sys'].forEach(function(x){$('p_'+x).className=(x===p?'':'hide');});
+}
+document.querySelectorAll('.side a').forEach(function(a){a.onclick=function(e){e.preventDefault();go(a.dataset.p);};});
+
+function saveTok(){var v=$('gatein').value.trim();if(!v){alert('请粘贴密钥');return;}
+  localStorage.setItem('panel_tok',v);TOKEN=v;$('gate').classList.add('hide');tick();}
+function saveHost(){var v=$('hostin').value.trim().replace(/^https?:\/\//,'').replace(/\/.*$/,'');
+  if(!v){alert('请填写云电脑地址，形如 xxx.trycloudflare.com');return;}
+  HOST=v;localStorage.setItem('panel_host',v);
+  $('hint').className='note';$('hint').textContent='正在连接 '+v+' …';tick();}
+/* 免密钥也能看监控；想远程操控再填密钥 */
+if(HOST)$('hostin').value=HOST;
+renderApps();tick();setInterval(tick,4000);
+</script>
+</body>
+</html>
