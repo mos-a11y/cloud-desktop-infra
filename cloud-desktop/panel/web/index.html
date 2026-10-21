@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>云面板 - 服务器管理面板</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="login" class="login">
+  <h2>☁ 云面板</h2>
+  <input id="pw" type="password" placeholder="请输入面板密码" onkeydown="if(event.key=='Enter')login()">
+  <button class="btn" style="width:100%;padding:11px" onclick="login()">登 录</button>
+  <p style="margin-top:12px;font-size:12px;color:#999">自研轻量控制面板 · 外网可访问</p>
+</div>
+
+<div id="app" class="hide">
+  <div class="top">
+    <div class="logo">☁ 云面板</div>
+    <div class="sub">Cloud Panel</div>
+    <div class="rt">
+      <span>负载 <b id="t_load">-</b></span>
+      <span>运行 <b id="t_up">-</b></span>
+      <span id="t_host">-</span>
+    </div>
+  </div>
+  <div class="side">
+    <a href="#" class="on" data-p="home">📊 首页监控</a>
+    <a href="#" data-p="proc">⚙ 进程管理</a>
+    <a href="#" data-p="store">🛒 软件商店</a>
+    <a href="#" data-p="term">💻 远程终端</a>
+    <a href="#" data-p="file">📁 文件管理</a>
+    <a href="#" data-p="sys">🖥 系统信息</a>
+  </div>
+  <div class="main">
+    <div id="p_home">
+      <div class="grid">
+        <div class="kpi"><div class="t">CPU 使用率</div><div class="v" id="k_cpu">-</div><div class="d" id="k_cpu_d">-</div><div class="bar" id="b_cpu"><i style="width:0"></i></div></div>
+        <div class="kpi"><div class="t">内存使用率</div><div class="v" id="k_mem">-</div><div class="d" id="k_mem_d">-</div><div class="bar" id="b_mem"><i style="width:0"></i></div></div>
+        <div class="kpi"><div class="t">磁盘使用率</div><div class="v" id="k_disk">-</div><div class="d" id="k_disk_d">-</div><div class="bar" id="b_disk"><i style="width:0"></i></div></div>
+        <div class="kpi"><div class="t">网络速率</div><div class="v" id="k_net">-</div><div class="d" id="k_net_d">-</div></div>
+      </div>
+      <div class="card"><h3>CPU 使用率曲线（近 2 分钟）</h3><canvas id="c_cpu"></canvas></div>
+      <div class="card"><h3>内存 / 网络曲线</h3><canvas id="c_mem"></canvas>
+        <div style="margin-top:8px;font-size:12px;color:#888"><span style="color:#1e5eff">■</span> 内存% &nbsp; <span style="color:#10b981">■</span> 下行KB/s &nbsp; <span style="color:#f59e0b">■</span> 上行KB/s</div>
+      </div>
+    </div>
+
+    <div id="p_proc" class="hide">
+      <div class="card"><h3>进程列表（按 CPU 占用排序）</h3>
+        <button class="btn" onclick="loadProc()">刷新</button>
+        <table><thead><tr><th>PID</th><th>名称</th><th>CPU%</th><th>内存</th><th>状态</th><th>命令</th><th>操作</th></tr></thead><tbody id="proc_body"></tbody></table>
+      </div>
+    </div>
+
+    <div id="p_store" class="hide">
+      <div class="card"><h3>软件商店 — 勾选后一键安装</h3>
+        <div id="apps" class="apps"></div>
+        <div style="margin-top:14px"><button class="btn g" onclick="install()">安装选中软件</button><button class="btn o" onclick="sysUpdate()">更新软件源</button></div>
+      </div>
+      <div class="card"><h3>安装日志</h3><pre class="log" id="ilog">等待任务…</pre></div>
+    </div>
+
+    <div id="p_term" class="hide">
+      <div class="card"><h3>远程终端</h3>
+        <div id="term"></div>
+        <input id="cmd" placeholder="输入命令回车执行（支持 top / htop / ls 等）" onkeydown="if(event.key=='Enter')sendCmd()">
+        <div style="margin-top:10px">
+          <button class="btn o" onclick="quick('neofetch')">系统信息</button>
+          <button class="btn o" onclick="quick('df -h')">磁盘</button>
+          <button class="btn o" onclick="quick('free -h')">内存</button>
+          <button class="btn o" onclick="quick('uname -a')">内核</button>
+          <button class="btn r" onclick="clearTerm()">清屏</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="p_file" class="hide">
+      <div class="card"><h3>文件管理</h3>
+        <input id="fpath" value="/" style="width:60%;padding:7px;border:1px solid #ddd;border-radius:4px">
+        <button class="btn" onclick="loadFiles()">打开</button>
+        <table style="margin-top:12px"><thead><tr><th>名称</th><th>类型</th><th>大小</th><th>修改时间</th><th>操作</th></tr></thead><tbody id="file_body"></tbody></table>
+      </div>
+    </div>
+
+    <div id="p_sys" class="hide">
+      <div class="card"><h3>系统信息</h3><table id="sys_body"></table></div>
+    </div>
+  </div>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>
