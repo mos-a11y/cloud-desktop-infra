@@ -1,0 +1,49 @@
+name: Web Proxy
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'target url'
+        required: true
+      rid:
+        description: 'request id'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fetch target page
+        run: |
+          set +e
+          mkdir -p .vm-output
+          OUT=".vm-output/proxy_${{ inputs.rid }}.txt"
+          echo "" > "$OUT"
+          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+          curl -sL --max-time 40 --compressed \
+               -A "$UA" \
+               -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" \
+               -H "Accept-Language: en-US,en;q=0.9" \
+               "${{ inputs.url }}" -o /tmp/page.html
+          echo "SIZE=$(wc -c < /tmp/page.html 2>/dev/null)"
+          if [ -s /tmp/page.html ]; then
+            base64 -w0 /tmp/page.html > "$OUT"
+          fi
+          exit 0
+
+      - name: Commit result
+        run: |
+          set +e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f .vm-output/
+          git diff --staged --quiet || git commit -m "proxy ${{ inputs.rid }}"
+          for i in 1 2 3; do git pull --rebase 2>/dev/null; git push && break || sleep 3; done
+          exit 0
