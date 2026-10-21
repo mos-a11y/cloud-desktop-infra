@@ -1,0 +1,55 @@
+name: Cloud Terminal
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: 'command'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  exec:
+    runs-on: ubuntu-latest
+    env:
+      USER_CMD: ${{ inputs.command }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run command
+        run: |
+          mkdir -p .vm-output
+          CWD=$(cat .vm-output/cwd 2>/dev/null || echo "$GITHUB_WORKSPACE")
+          cd "$CWD" 2>/dev/null || cd "$GITHUB_WORKSPACE"
+
+          {
+            echo "┌─ 环境: ubuntu-latest"
+            echo "├─ 目录: $(pwd)"
+            echo "├─ 时间: $(date '+%Y-%m-%d %H:%M:%S')"
+            echo "└─ 命令: $USER_CMD"
+            echo "──────────────────────────────────────"
+          } > .vm-output/last.txt
+
+          set +e
+          eval "$USER_CMD" >> .vm-output/last.txt 2>&1
+          EXIT=$?
+          set -e
+
+          {
+            echo "──────────────────────────────────────"
+            echo "退出码: $EXIT"
+          } >> .vm-output/last.txt
+
+          pwd > .vm-output/cwd
+
+      - name: Save output
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f .vm-output/last.txt .vm-output/cwd 2>/dev/null || true
+          git diff --staged --quiet || git commit -m "cloud terminal output"
+          for i in 1 2 3; do git push && break || sleep 3; done
+          exit 0
