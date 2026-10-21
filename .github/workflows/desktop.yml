@@ -1,0 +1,361 @@
+name: Cloud Desktop
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  desktop:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install core desktop (keep it small and fast)
+        run: |
+          set +e
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            locales language-pack-zh-hans fonts-wqy-microhei fonts-wqy-zenhei \
+            xvfb x11vnc xfce4 xfce4-goodies xterm novnc websockify \
+            netcat-openbsd curl dbus-x11
+          sudo locale-gen zh_CN.UTF-8 2>&1 | tail -2
+          mkdir -p .vm-output
+          sudo rm -rf /opt/novnc
+          (sudo git clone --depth 1 https://github.com/novnc/noVNC.git /opt/novnc) > /dev/null 2>&1
+          if [ ! -f /opt/novnc/vnc.html ]; then
+            curl -sL https://github.com/novnc/noVNC/archive/refs/heads/master.tar.gz -o /tmp/nv.tgz > /dev/null 2>&1
+            sudo mkdir -p /opt/novnc
+            sudo tar xzf /tmp/nv.tgz -C /opt/novnc --strip-components=1 > /dev/null 2>&1
+          fi
+          sudo chmod -R 755 /opt/novnc 2>/dev/null
+          echo "installed" > .vm-output/diag.txt
+          exit 0
+
+      - name: Start Xvfb + XFCE + x11vnc + websockify
+        run: |
+          set +e
+          mkdir -p .vm-output
+          export LANG=zh_CN.UTF-8
+          export LC_ALL=zh_CN.UTF-8
+          export LANGUAGE=zh_CN:zh
+          export DISPLAY=:1
+          setsid nohup Xvfb :1 -screen 0 1280x800x16 -ac -nolisten tcp > /tmp/xvfb.log 2>&1 < /dev/null &
+          sleep 4
+          dbus-daemon --session --address=unix:path=/tmp/dbus-sock --fork --print-address > /dev/null 2>&1
+          export DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus-sock
+          setsid nohup dbus-launch --exit-with-session xfce4-session > /tmp/xfce.log 2>&1 < /dev/null &
+          sleep 12
+          pgrep -f "xfdesktop|xfwm4|xfce4-session" > /dev/null || { setsid nohup startxfce4 > /tmp/xfce2.log 2>&1 < /dev/null & sleep 10; }
+          pgrep -f "xfdesktop|xfwm4" > /dev/null || { setsid nohup xterm -geometry 100x30 > /tmp/xterm.log 2>&1 < /dev/null & sleep 3; }
+          mkdir -p "$HOME/.vnc"
+          x11vnc -storepasswd 123456 "$HOME/.vnc/passwd" > /dev/null 2>&1
+          setsid nohup x11vnc -display :1 -forever -shared -rfbauth "$HOME/.vnc/passwd" -rfbport 5901 \
+            -noxdamage -threads -ncache 10 -ncache_cr -scrollcopyrect -compresslevel 6 -quality 6 \
+            -deferupdate 30 -quiet > /tmp/x11vnc.log 2>&1 < /dev/null &
+          sleep 5
+          WEBROOT=""
+          [ -f /opt/novnc/vnc.html ] && WEBROOT=/opt/novnc
+          [ -z "$WEBROOT" ] && [ -f /usr/share/novnc/vnc.html ] && WEBROOT=/usr/share/novnc
+          if [ -n "$WEBROOT" ]; then
+            setsid nohup websockify --web="$WEBROOT" --heartbeat 30 6080 localhost:5901 > /tmp/ws.log 2>&1 < /dev/null &
+          else
+            setsid nohup websockify --heartbeat 30 6080 localhost:5901 > /tmp/ws.log 2>&1 < /dev/null &
+          fi
+          sleep 5
+          RFB=$(timeout 5 bash -c 'exec 3<>/dev/tcp/127.0.0.1/5901; head -c 12 <&3' 2>/dev/null | tr -cd '[:print:]')
+          {
+            echo "LANG:     ${LANG:-unset}"
+
+            echo "Xvfb:     $(pgrep -f 'Xvfb :1' >/dev/null && echo OK || echo FAIL)"
+            echo "XFCE:     $(pgrep -f 'xfdesktop|xfwm4|xfce4-session' >/dev/null && echo OK || echo FAIL)"
+            echo "x11vnc:   $(pgrep -f x11vnc >/dev/null && echo OK || echo FAIL)"
+            echo "websock:  $(pgrep -f websockify >/dev/null && echo OK || echo FAIL)"
+            echo "WEBROOT:  ${WEBROOT:-NONE}"
+            echo "5901:     $(nc -z -w2 127.0.0.1 5901 && echo LISTEN || echo DOWN)"
+            echo "6080:     $(nc -z -w2 127.0.0.1 6080 && echo LISTEN || echo DOWN)"
+            echo "RFB:      ${RFB:-EMPTY}"
+            echo "http6080: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:6080/vnc.html)"
+            echo "rootcode: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:6080/)"
+          } > .vm-output/diag.txt
+          cat .vm-output/diag.txt
+          exit 0
+
+      - name: Expose via cloudflared tunnel
+        run: |
+          set +e
+          mkdir -p .vm-output
+          echo "" > .vm-output/desktop-url.txt
+          curl -sL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /tmp/cf > /dev/null 2>&1
+          chmod +x /tmp/cf 2>/dev/null
+          if [ -s /tmp/cf ]; then
+            setsid nohup /tmp/cf tunnel --url http://localhost:6080 --no-autoupdate > /tmp/cf.log 2>&1 < /dev/null &
+            for i in $(seq 1 20); do
+              sleep 3
+              URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/cf.log 2>/dev/null | head -1)
+              [ -n "$URL" ] && break
+            done
+            [ -n "$URL" ] && echo "$URL" > .vm-output/desktop-url.txt
+          fi
+          if [ ! -s .vm-output/desktop-url.txt ]; then
+            nohup ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -R 80:localhost:6080 serveo.net > /tmp/sv.log 2>&1 &
+            sleep 20
+            URL2=$(grep -oE 'https://[a-z0-9]+\.serveo\.net' /tmp/sv.log 2>/dev/null | head -1)
+            [ -n "$URL2" ] && echo "$URL2" > .vm-output/desktop-url.txt
+          fi
+          [ -s .vm-output/desktop-url.txt ] || echo "TUNNEL_FAILED" > .vm-output/desktop-url.txt
+          echo "URL=$(cat .vm-output/desktop-url.txt)"
+          exit 0
+
+      - name: Commit status
+        run: |
+          set +e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f .vm-output/
+          git diff --staged --quiet || git commit -m "desktop status"
+          for i in 1 2 3; do git push && break || sleep 3; done
+          exit 0
+
+      - name: Install browsers + app store + zh theme
+        run: |
+          set +e
+          chmod +x cloud-desktop/setup.sh cloud-desktop/app-store.sh 2>/dev/null
+          bash cloud-desktop/setup.sh 2>&1 | tail -5
+          mkdir -p .vm-output
+          cp /tmp/setup.log .vm-output/setup.log 2>/dev/null
+          {
+            echo "--- diag ---"
+            echo "zenity: $(command -v zenity || echo MISSING)"
+            echo "appstore_bytes: $(wc -c < /usr/local/bin/app-store.sh 2>/dev/null || echo 0)"
+            echo "desktop_files: $(ls ~/Desktop 2>/dev/null | tr '\n' ' ')"
+            echo "firefox: $([ -x /opt/firefox/firefox ] && echo ok || echo none)"
+            echo "chrome: $(command -v google-chrome-stable >/dev/null && echo ok || echo none)"
+            echo "theme: $(xfconf-query -c xsettings -p /Net/ThemeName 2>/dev/null)"
+          } >> .vm-output/setup.log
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f .vm-output/
+          git diff --staged --quiet || git commit -m "setup log"
+          for i in 1 2 3; do git push && break || { git pull --rebase -X ours; sleep 3; }; done
+          cat .vm-output/setup.log
+          exit 0
+
+      - name: Keep alive
+        run: |
+          set +e
+          mkdir -p .vm-output
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          start_tunnels() {
+            pkill -f cloudflared >/dev/null 2>&1
+            pkill -f "a.pinggy.io" >/dev/null 2>&1
+            pkill -f "localhost.run" >/dev/null 2>&1
+            pkill -f "serveo.net" >/dev/null 2>&1
+            sleep 2
+            : > .vm-output/tunnels.txt
+            [ -s /tmp/cf ] || curl -sL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /tmp/cf >/dev/null 2>&1
+            chmod +x /tmp/cf 2>/dev/null
+            if [ -s /tmp/cf ]; then
+              setsid nohup /tmp/cf tunnel --url http://localhost:6080 --no-autoupdate > /tmp/cf2.log 2>&1 < /dev/null &
+              for i in $(seq 1 15); do
+                sleep 4
+                U=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/cf2.log 2>/dev/null | head -1)
+                [ -n "$U" ] && echo "cloudflared=$U" >> .vm-output/tunnels.txt && break
+              done
+            fi
+            setsid nohup ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -p 443 -R 0:localhost:6080 a.pinggy.io > /tmp/pg.log 2>&1 < /dev/null &
+            for i in $(seq 1 12); do
+              sleep 4
+              U=$(grep -oE 'https://[A-Za-z0-9._-]+\.(a\.)?free\.pinggy\.link' /tmp/pg.log 2>/dev/null | head -1)
+              [ -z "$U" ] && U=$(grep -oE 'https://[A-Za-z0-9._-]+\.pinggy\.link' /tmp/pg.log 2>/dev/null | grep -v dashboard | head -1)
+              [ -n "$U" ] && echo "pinggy=$U" >> .vm-output/tunnels.txt && break
+            done
+            setsid nohup ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 80:localhost:6080 nokey@localhost.run > /tmp/lr.log 2>&1 < /dev/null &
+            for i in $(seq 1 12); do
+              sleep 4
+              U=$(grep -oE 'https://[A-Za-z0-9._-]+\.(lhr\.life|localhost\.run)' /tmp/lr.log 2>/dev/null | grep -vE 'admin|dashboard|console|www' | head -1)
+              [ -n "$U" ] && echo "localhostrun=$U" >> .vm-output/tunnels.txt && break
+            done
+            setsid nohup ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 80:localhost:6080 serveo.net > /tmp/sv2.log 2>&1 < /dev/null &
+            for i in $(seq 1 8); do
+              sleep 4
+              U=$(grep -oE 'https://[A-Za-z0-9-]+\.serveo\.net' /tmp/sv2.log 2>/dev/null | grep -vE 'console|www' | head -1)
+              [ -n "$U" ] && echo "serveo=$U" >> .vm-output/tunnels.txt && break
+            done
+          }
+
+          commit_out() {
+            git add -f .vm-output/ >/dev/null 2>&1
+            git diff --staged --quiet && return 0
+            git commit -m "vm status" >/dev/null 2>&1
+            git push >/dev/null 2>&1 || { git pull --rebase -X ours >/dev/null 2>&1; git push >/dev/null 2>&1; }
+          }
+
+          start_panel() {
+            pgrep -f "panel/server.py" >/dev/null || {
+              setsid nohup python3 cloud-desktop/panel/server.py > /tmp/panel.log 2>&1 < /dev/null &
+              sleep 5
+            }
+            : > .vm-output/panel-tunnels.txt
+            : > /tmp/panel-debug.log
+            echo "panel_local=$(curl -s -o /dev/null -w '%{http_code}' -m 8 http://localhost:8899/)" >> /tmp/panel-debug.log
+            pkill -f "8899" >/dev/null 2>&1
+            pkill -f "cf3.log" >/dev/null 2>&1
+            sleep 2
+            [ -s /tmp/cf ] || curl -sL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /tmp/cf >/dev/null 2>&1
+            chmod +x /tmp/cf 2>/dev/null
+            if [ -s /tmp/cf ]; then
+              setsid nohup /tmp/cf tunnel --url http://localhost:8899 --no-autoupdate --loglevel info --metrics localhost:20242 > /tmp/cf3.log 2>&1 < /dev/null &
+              for i in $(seq 1 20); do
+                sleep 5
+                U=$(grep -oE 'https://[a-z0-9-]+\\.trycloudflare\\.com' /tmp/cf3.log 2>/dev/null | head -1)
+                [ -n "$U" ] && echo "cf=$U" >> .vm-output/panel-tunnels.txt && break
+              done
+            fi
+            echo "== cf3 ==" >> /tmp/panel-debug.log
+            tail -12 /tmp/cf3.log >> /tmp/panel-debug.log 2>/dev/null
+
+            setsid nohup ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -p 443 -R 0:localhost:8899 a.pinggy.io > /tmp/pg3.log 2>&1 < /dev/null &
+            for i in $(seq 1 12); do
+              sleep 5
+              U=$(grep -oE 'https://[A-Za-z0-9._-]+' /tmp/pg3.log 2>/dev/null | grep -vE 'dashboard|pinggy\\.io$' | head -1)
+              [ -n "$U" ] && echo "pg=$U" >> .vm-output/panel-tunnels.txt && break
+            done
+            echo "== pg3 ==" >> /tmp/panel-debug.log
+            tail -12 /tmp/pg3.log >> /tmp/panel-debug.log 2>/dev/null
+
+            setsid nohup ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 80:localhost:8899 nokey@localhost.run > /tmp/lr2.log 2>&1 < /dev/null &
+            for i in $(seq 1 12); do
+              sleep 5
+              U=$(grep -oE 'https://[A-Za-z0-9._-]+\\.(lhr\\.life|localhost\\.run)' /tmp/lr2.log 2>/dev/null | grep -vE 'admin|dashboard|console|www' | head -1)
+              [ -n "$U" ] && echo "lr=$U" >> .vm-output/panel-tunnels.txt && break
+            done
+            echo "== lr2 ==" >> /tmp/panel-debug.log
+            tail -12 /tmp/lr2.log >> /tmp/panel-debug.log 2>/dev/null
+
+            setsid nohup ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 80:localhost:8899 serveo.net > /tmp/sv3.log 2>&1 < /dev/null &
+            for i in $(seq 1 8); do
+              sleep 5
+              U=$(grep -oE 'https://[A-Za-z0-9._-]+\\.serveo\\.net' /tmp/sv3.log 2>/dev/null | grep -vE 'console|www' | head -1)
+              [ -n "$U" ] && echo "sv=$U" >> .vm-output/panel-tunnels.txt && break
+            done
+            echo "== sv3 ==" >> /tmp/panel-debug.log
+            tail -8 /tmp/sv3.log >> /tmp/panel-debug.log 2>/dev/null
+            echo "== panel.log ==" >> /tmp/panel-debug.log
+            tail -5 /tmp/panel.log >> /tmp/panel-debug.log 2>/dev/null
+            cp /tmp/panel-debug.log .vm-output/panel-debug.log
+            echo "panel_pid=$(pgrep -f panel/server.py | head -1)" > .vm-output/panel.info
+          }
+
+          start_executor() {
+            pkill -f "cloud-desktop/executor.sh" >/dev/null 2>&1
+            setsid nohup bash cloud-desktop/executor.sh > /tmp/exec.log 2>&1 < /dev/null &
+            sleep 3
+          }
+
+          start_snapshot() {
+            pkill -f "cloud-desktop/snapshot.sh" >/dev/null 2>&1
+            setsid nohup bash cloud-desktop/snapshot.sh > /tmp/snap.log 2>&1 < /dev/null &
+            sleep 6
+            echo "snap_procs=$(pgrep -f cloud-desktop/snapshot.sh | wc -l)" >> .vm-output/snap.info
+          }
+
+          sample_and_push() {
+            bash cloud-desktop/sample.sh > /tmp/sample.log 2>&1
+            git add -f .vm-output/ >/dev/null 2>&1
+            if ! git diff --staged --quiet; then git commit -m "stats" >/dev/null 2>&1; fi
+            git pull --rebase -X ours >/dev/null 2>&1
+            git push >/dev/null 2>&1 || git push >/dev/null 2>&1
+          }
+
+          panel_ok() {
+            while IFS='=' read -r N U; do
+              [ -z "$U" ] && continue
+              case "$U" in *dashboard*|*console*|*admin.*|*www.*) continue;; esac
+              if curl -s -m 15 "$U/" | grep -q "云面板"; then
+                echo "$U" > .vm-output/panel-url.txt
+                return 0
+              fi
+            done < .vm-output/panel-tunnels.txt 2>/dev/null
+            return 1
+          }
+
+          # 保证桌面 + 中文 + Firefox 都活着（放在本步骤里才不会被步骤结束时清理）
+          export DISPLAY=:1
+          export DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus-sock
+          export LANG=zh_CN.UTF-8
+          export LC_ALL=zh_CN.UTF-8
+          export LANGUAGE=zh_CN:zh
+          pgrep -f 'Xvfb :1' >/dev/null || { setsid nohup Xvfb :1 -screen 0 1280x800x24 > /tmp/xvfb2.log 2>&1 < /dev/null & sleep 4; }
+          pgrep -f 'xfdesktop|xfwm4' >/dev/null || { setsid nohup startxfce4 > /tmp/xfce3.log 2>&1 < /dev/null & sleep 12; }
+          pgrep -f x11vnc >/dev/null || { mkdir -p "$HOME/.vnc"; x11vnc -storepasswd 123456 "$HOME/.vnc/passwd" >/dev/null 2>&1; setsid nohup x11vnc -display :1 -forever -shared -rfbauth "$HOME/.vnc/passwd" -rfbport 5901 -noxdamage -threads > /tmp/x11vnc2.log 2>&1 < /dev/null & sleep 5; }
+          pgrep -f websockify >/dev/null || { WEBROOT=/opt/novnc; [ -f /opt/novnc/vnc.html ] || WEBROOT=/usr/share/novnc; setsid nohup websockify --web=$WEBROOT --heartbeat 30 6080 localhost:5901 > /tmp/ws2.log 2>&1 < /dev/null & sleep 5; }
+          pkill -f xfdesktop >/dev/null 2>&1; sleep 2
+          setsid nohup xfdesktop --display=:1 > /tmp/xfdesktop3.log 2>&1 < /dev/null &
+          sleep 5
+          FF=""
+          [ -x /opt/firefox/firefox ] && FF=/opt/firefox/firefox
+          [ -z "$FF" ] && [ -x /usr/bin/firefox ] && FF=/usr/bin/firefox
+          if [ -n "$FF" ]; then
+            export MOZ_DISABLE_CONTENT_SANDBOX=1
+            setsid nohup "$FF" --display=:1 about:blank > /tmp/ff-run.log 2>&1 < /dev/null &
+            sleep 10
+          fi
+          echo "FF=$FF" > .vm-output/ff.txt
+
+          start_panel
+          panel_ok
+          GITHUB_TOKEN='${{ github.token }}' python3 cloud-desktop/push_stats.py > /tmp/bridge.log 2>&1
+          cat /tmp/bridge.log > .vm-output/bridge.log
+          git add -f .vm-output/ >/dev/null 2>&1
+          git diff --staged --quiet || git commit -m "bridge init" >/dev/null 2>&1
+          git push >/dev/null 2>&1 || git push >/dev/null 2>&1
+
+          start_tunnels
+          commit_out
+          LAST=""
+          for i in $(seq 1 155); do
+            OK=""
+            BESTT=999
+            : > .vm-output/speed.txt
+            while IFS='=' read -r N U; do
+              [ -z "$U" ] && continue
+              case "$U" in *dashboard*|*console*|*admin.*|*www.*) continue;; esac
+              if curl -s -m 15 "$U/vnc.html" | grep -qi novnc; then
+                T=$(curl -s -o /dev/null -m 15 -w '%{time_starttransfer}' "$U/vnc.html")
+                echo "$N $T $U" >> .vm-output/speed.txt
+                FAST=$(awk "BEGIN{print ($T<$BESTT)?1:0}")
+                [ "$FAST" = "1" ] && { BESTT=$T; OK="$U"; }
+              fi
+            done < .vm-output/tunnels.txt 2>/dev/null
+            if [ -z "$OK" ]; then
+              start_tunnels
+              sleep 5
+              OK=$(head -1 .vm-output/tunnels.txt 2>/dev/null | cut -d= -f2-)
+            fi
+            for k in 1 2 3 4 5 6; do
+              GITHUB_TOKEN='${{ github.token }}' python3 cloud-desktop/push_stats.py > /tmp/bridge.log 2>&1
+              cat /tmp/bridge.log > .vm-output/bridge.log
+              git add -f .vm-output/ >/dev/null 2>&1
+              if ! git diff --staged --quiet; then git commit -m "bridge" >/dev/null 2>&1; fi
+              git pull --rebase -X ours >/dev/null 2>&1
+              git push >/dev/null 2>&1 || git push >/dev/null 2>&1
+              sleep 8
+            done
+            if ! panel_ok; then
+              start_panel
+              panel_ok
+            fi
+            if [ -n "$OK" ] && [ "$OK" != "$LAST" ]; then
+              echo "${OK}/vnc.html?autoconnect=true&reconnect=true&reconnect_delay=2000&resize=scale&compress=true&quality=5&compression=6&view_clip=true" > .vm-output/desktop-url.txt
+              echo "url switched -> $OK"
+              commit_out
+              LAST="$OK"
+            fi
+            sleep 50
+          done
+          exit 0
