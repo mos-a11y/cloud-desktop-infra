@@ -1,0 +1,12 @@
+{
+  "name": "cloud-pc",
+  "forwardPorts": [7681],
+  "postStartCommand": "bash .vm/start.sh",
+  "portsAttributes": {
+    "7681": {
+      "label": "cloud-terminal",
+      "visibility": "public",
+      "onAutoForward": "silent"
+    }
+  }
+}
